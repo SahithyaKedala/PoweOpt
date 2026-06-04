@@ -1,0 +1,32 @@
+# Dependencies
+node_modules/
+my_env/
+
+# Build output
+dist/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Database files
+*.db
+*.sqlite3
+
+# Environment / secrets
+.env
+.env.local
+.env.production
+
+# Temp / generated scripts
+inspect_db.py
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Editor
+.vscode/
+.idea/
