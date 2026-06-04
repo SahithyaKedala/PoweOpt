@@ -1,166 +1,174 @@
 # PowerOpt
 
-## Overview
+## What this project does
 
-PowerOpt is an AI-based decision support system designed for real-time dispatch optimization, renewable forecasting, and market-aware power operations. It helps power system operators balance electricity demand with available generation sources such as thermal, solar, wind, and hydro power.
+PowerOpt is a simple tool for power system operators. It helps manage electricity supply by:
 
-The system provides optimized generator dispatch, market purchase recommendations, and renewable energy forecasting to reduce operational costs and improve grid reliability.
+- forecasting renewable output and demand,
+- optimizing which generators should run,
+- checking generator limits and ramp rates,
+- suggesting when to buy power from market sources.
 
----
+This makes it easier to keep the grid balanced and control operating cost.
 
-## Features
+## Main features
 
-* Merit Order Dispatch Optimization
-* Renewable Energy Forecasting
-* Real-Time Market (RTM) and IEX Integration
-* Generator Ramp Rate Management
-* Gate Closure Scheduling Support
-* AI-Based Power Purchase Recommendations
-* Interactive Dashboard with Charts and KPIs
-* Dark and Light Mode Support
+- Merit-order dispatch optimization for generators
+- Renewable forecast support for solar, wind, and hydro
+- Simple market purchase recommendation logic
+- Runtime support for generator ramp rates and constraints
+- Dashboard display with charts and KPIs
+- Light and dark mode in the user interface
 
----
+## Technology used
 
-## Technology Stack
+Frontend:
+- React
+- TypeScript
+- Vite
+- CSS
 
-### Frontend
+Backend:
+- Python
+- SQLAlchemy
+- SQLite
 
-* React.js
-* TypeScript
-* Vite
-* Chart.js / Recharts
-* CSS
+## Folder structure
 
-### Backend
-
-* Python
-* SQLAlchemy
-* SQLite
-
----
-
-## Project Structure
-
-```text
-Agentic/
-│
+```
+LGB_AGENTIC/
 ├── backend/
 │   ├── database.py
 │   ├── optimizer.py
-│   └── requirements.txt
-│
+│   ├── main.py
+│   ├── requirements.txt
+│   └── ...
+├── public/
 ├── src/
-│   ├── components/
-│   ├── utils/
 │   ├── App.tsx
 │   ├── main.tsx
-│   └── index.css
-│
+│   ├── App.css
+│   ├── index.css
+│   ├── components/
+│   └── utils/
 ├── package.json
-└── README.md
+├── README.md
+└── tsconfig.json
 ```
 
----
+## How to run this project
 
-## Installation
+### Frontend steps
 
-### Frontend Setup
-
-Install dependencies:
+1. Open the project root folder.
+2. Install Node dependencies:
 
 ```bash
 npm install
 ```
 
-Run the application:
+3. Start the frontend:
 
 ```bash
 npm run dev
 ```
 
-Open:
+4. Open the browser at:
 
 ```text
 http://localhost:5174
 ```
 
----
+### Backend steps
 
-### Backend Setup
-
-Navigate to backend folder:
+1. Open the `backend` folder.
+2. Create a Python virtual environment:
 
 ```bash
 cd backend
-```
-
-Create virtual environment:
-
-```bash
 python -m venv my_env
 ```
 
-Activate environment:
-
-Windows:
+3. Activate the environment:
 
 ```bash
 .\my_env\Scripts\activate
 ```
 
-Linux/Mac:
-
-```bash
-source my_env/bin/activate
-```
-
-Install dependencies:
+4. Install backend packages:
 
 ```bash
 pip install -r requirements.txt
 ```
 
-Create database tables:
+5. Run the backend server or scripts as needed.
 
-```bash
-python -c "from database import create_tables; create_tables()"
-```
+## How the system works
 
----
+1. The system reads demand and renewable forecast data.
+2. It calculates how much generation is available.
+3. It sorts generators by cost and chooses the best units first.
+4. It checks each generator’s limits and ramp rates.
+5. When supply is not enough, it recommends market purchases.
+6. It sends results to the dashboard for display.
 
-## Database Tables
+## How the LPP optimizer works
 
-* generators
-* markets
-* dispatch_blocks
-* alerts
-* market_prices
-* excel_uploads
+The optimizer is in `backend/optimizer.py` and uses the PuLP library for linear programming. It performs two main steps:
 
----
+- Baseline optimization for the full day (96 blocks) to get a reference schedule.
+- Rolling block-by-block dispatch that applies gate-closure rules and locks central generator output after a boundary.
 
-## Working
+### What is used in the optimizer
 
-1. Load demand and renewable forecasts.
-2. Calculate available generation.
-3. Apply merit-order dispatch.
-4. Check generator constraints and ramp rates.
-5. Purchase power from markets if required.
-6. Generate recommendations for operators.
-7. Display results through dashboard visualizations.
+- `PuLP` to build LP problems and solve them with `CBC`.
+- `Generator` objects with type, cost, capacity, ramp rate, and availability.
+- `Market` objects for RTM prices and market purchase limits.
+- `MustRunForecast` for solar, wind, hydro, and IPP power.
+- `SimulationParams` to pass all input data into the solver.
 
----
+### Key rules in the model
 
-## Future Enhancements
+- Must-run solar and wind are always included.
+- Hydro has a dispatch limit and a daily budget.
+- State thermal and IPP generators are dispatched with ramp limits.
+- Central generator (CGS) output is locked after a gate-closure boundary depending on odd/even block rules.
+- RTM purchase is allowed but treated as last resort with a high premium.
+- Shortage and curtailment are penalized heavily to keep the model stable.
 
-* Machine Learning-based demand forecasting
-* Weather API integration
-* Real-time SCADA connectivity
-* Advanced market bidding strategies
-* Mobile application support
+### Cost calculation
 
----
+- Thermal generator cost = output × generator cost × 250.
+- Hydro cost = hydro output × ₹2/kWh × 250.
+- RTM cost = purchase × (MCP + premium) × 0.25.
+- Shortage cost and curtailment cost are high penalties to avoid unserved energy and unnecessary spill.
 
-## Conclusion
+### Output and recommendations
 
-The TRANSCO Power Purchase Co-pilot helps power utilities make smarter power purchase decisions by combining optimization algorithms, renewable forecasting, and market intelligence in a single platform.
+For each block, the optimizer returns:
+
+- dispatch for each generator
+- hydro dispatch and must-run totals
+- RTM market buy decision
+- shortage and curtailment values
+- total cost and marginal cost
+- alerts and recommendations for the next 2 hours
+
+This section explains how your LP-based optimizer works and what it uses, so the README now documents the full LPP approach.
+
+## Notes for users
+
+- Keep the backend virtual environment activated when running Python scripts.
+- Use the frontend server to view the dashboard and charts.
+- If you change data or settings, restart the app to apply updates.
+
+## Possible improvements
+
+- Add weather forecast input
+- Use real-time market price feeds
+- Add more detailed demand forecasting
+- Improve alert and notification handling
+
+## Summary
+
+PowerOpt is a practical demo tool for power dispatch planning. It combines a Python backend and a React frontend so operators can see optimization results and manage power purchase decisions more clearly.
