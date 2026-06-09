@@ -1,37 +1,180 @@
 # PowerOpt
 
-## What this project does
+## Project overview
 
-PowerOpt is a simple tool for power system operators. It helps manage electricity supply by:
+PowerOpt is a grid scheduling and dispatch planning application built for power system operators, planners, and energy analysts.
 
-- forecasting renewable output and demand,
-- optimizing which generators should run,
-- checking generator limits and ramp rates,
-- suggesting when to buy power from market sources.
+It reads 96-block day-ahead forecast data, computes a grid dispatch using real generator availability and cost constraints, and displays the results in an interactive chart-based dashboard. The system also runs a second cost-minimizing optimization to compare real dispatch against a lower-cost schedule and highlight savings.
 
-This makes it easier to keep the grid balanced and control operating cost.
+This repository combines:
+- a Python backend for data loading and optimization,
+- a React + TypeScript frontend for the dashboard,
+- a SQLite forecast database for real block-by-block inputs.
 
-## Main features
+## What problem this solves
 
-- Merit-order dispatch optimization for generators
-- Renewable forecast support for solar, wind, and hydro
-- Simple market purchase recommendation logic
-- Runtime support for generator ramp rates and constraints
-- Dashboard display with charts and KPIs
-- Light and dark mode in the user interface
+Power systems must balance supply and demand every 15 minutes. This tool helps by:
 
-## Technology used
+- forecasting renewable generation and load demand,
+- choosing the right mix of generators from the cheapest available units,
+- enforcing generator technical limits and ramp rate rules,
+- deciding when to buy or sell power in the real-time market (RTM),
+- estimating total operating cost and potential savings.
 
-Frontend:
-- React
-- TypeScript
-- Vite
-- CSS
+The goal is to help people understand how different schedules affect cost, shortage, surplus, and market interactions.
 
-Backend:
-- Python
-- SQLAlchemy
-- SQLite
+## What this application does
+
+1. Loads 96-block forecast data from `src/LGB.db` via the backend.
+2. Loads generator availability and cost data from the same forecast source.
+3. Computes a block-by-block dispatch schedule using a rolling dispatch simulator.
+4. Runs a second, daily cost optimization using the HiGHS LP solver.
+5. Sends the results to the dashboard for interactive visualization.
+6. Allows users to inspect block-level decisions such as RTM buy/sell, renewable curtailment, and shortage.
+
+## Technology stack
+
+### Frontend
+
+- **React** for building UI components.
+- **TypeScript** for typed frontend code.
+- **Vite** for fast development and build.
+- **Recharts** for charts and time-series visualizations.
+- **Lucide React** for icons.
+- **CSS** for layout, cards, and dashboard styling.
+
+### Backend
+
+- **Python** as the server and optimization runtime.
+- **FastAPI** to expose HTTP endpoints for forecast, generator, and simulation data.
+- **SQLAlchemy** for ORM access to the forecast database.
+- **SQLite** for local forecast and generator data storage.
+- **PuLP** for formulation and rolling-horizon dispatch logic.
+- **HiGHS** via `highspy` for solving the full LP cost optimization.
+
+### Data / database
+
+- Forecast data is read from `src/LGB.db`.
+- The backend also supports `forecast .db` or `forecast.db` if present.
+- The database contains 96-block values for demand, solar, wind, hydro, CGS ceilings, and market prices.
+
+## System architecture
+
+The project is divided into two main layers:
+
+1. **Backend layer** (`backend/`)
+   - `main.py` exposes REST APIs.
+   - `database.py` reads forecast and generator tables.
+   - `optimizer.py` implements dispatch and cost optimization.
+
+2. **Frontend layer** (`src/`)
+   - `App.tsx` orchestrates fetch calls and user interaction.
+   - `Dashboard.tsx` renders charts, tables, and block details.
+   - `utils/optimizer.ts` contains helper functions for data formatting.
+
+## How the optimization works
+
+### Rolling dispatch simulation
+
+The rolling dispatch simulator is designed to model realistic operational rules.
+
+Key features:
+- Runs over 96 blocks (15-minute intervals for one day).
+- Sorts generators by merit order using rank and cost.
+- Enforces generator availability and technical minimum limits.
+- Applies ramp rate restrictions so output cannot change too fast.
+- Uses market purchases only after local generation options are exhausted.
+- Honors special CGS locking rules depending on whether the current block is odd or even.
+
+The result is a feasible dispatch schedule that follows real operating behavior.
+
+### HiGHS cost optimization
+
+A second solver uses a linear programming model to minimize total operating cost across all 96 blocks.
+
+The model includes:
+- generator dispatch variables for every unit and every block,
+- RTM market buy/sell variables,
+- hydro dispatch variables,
+- shortage and curtailment variables.
+
+The objective minimizes:
+- thermal generation cost,
+- RTM buy cost with a premium (to make RTM a last resort),
+- RTM sell revenue at a discounted price,
+- shortage penalty,
+- renewable curtailment penalty.
+
+This optimization answers the question: "If we only focus on cost and respect technical constraints, what is the cheapest feasible schedule for the day?"
+
+## What the graphs show
+
+The dashboard uses Recharts to display the following key insights:
+
+- **Demand vs Availability**: a block-by-block view showing how total available generation compares to forecast demand.
+- **Thermal and renewable supply split**: state thermal, central thermal, IPP, solar, wind, hydro.
+- **RTM activity**: quantities bought from and sold to the market in each block.
+- **Shortage / Surplus**: where demand is not met or where excess energy exists.
+- **Forecast delta**: the gap between total available energy and demand for each block.
+- **RTM price curve**: market clearing price across the 96 blocks.
+
+### Graph implementation details
+
+The dashboard uses these chart types:
+- `ComposedChart` for mixed line-and-bar timeline charts.
+- `Area` and `Bar` series for stacked generation profiles.
+- `Line` series for demand and price curves.
+- `PieChart` for summary or category breakdowns.
+
+Interactive tooltips show block-level values, and the table can scroll to the currently selected block.
+
+## How to use it
+
+### Run frontend
+
+```bash
+npm install
+npm run dev
+```
+
+Visit:
+
+```text
+http://localhost:5174
+```
+
+### Run backend
+
+```bash
+cd backend
+python -m venv my_env
+.\my_env\Scripts\activate
+pip install -r requirements.txt
+python main.py
+```
+
+### API endpoints
+
+- `GET /api/health` – backend health and database connection check.
+- `GET /api/forecast` – 96-block demand and renewable forecast.
+- `GET /api/market-prices` – RTM price curve.
+- `GET /api/generators` – generator list with cost, availability, and technical minimum.
+- `POST /api/simulation/run` – run the main dispatch and cost optimization simulation.
+
+## Key domain concepts explained
+
+- **Merit-order dispatch**: Generators are ranked by operating cost and used in cheapest-first order.
+- **Technical minimum**: The minimum stable output for a thermal generator when it is committed.
+- **Ramp rate**: The maximum change in generator output between consecutive 15-minute blocks.
+- **RTM buy / sell**: Market transactions used to cover shortages or monetize surplus energy.
+- **Curtailment**: Renewable energy that is available but cannot be used because demand is already met.
+- **Shortage**: Demand that is not served by generation or market purchases.
+
+## What this project demonstrates
+
+- How a dispatch scheduler can combine forecast data, generator availability, and market prices.
+- How an optimization model can compare an operational dispatch to an ideal cost-minimizing dispatch.
+- How a dashboard can make complex 96-block schedules easy to understand.
 
 ## Folder structure
 
@@ -39,8 +182,8 @@ Backend:
 LGB_AGENTIC/
 ├── backend/
 │   ├── database.py
-│   ├── optimizer.py
 │   ├── main.py
+│   ├── optimizer.py
 │   ├── requirements.txt
 │   └── ...
 ├── public/
@@ -49,126 +192,17 @@ LGB_AGENTIC/
 │   ├── main.tsx
 │   ├── App.css
 │   ├── index.css
-│   ├── components/
-│   └── utils/
+│   ├── components/Dashboard.tsx
+│   └── utils/optimizer.ts
 ├── package.json
 ├── README.md
 └── tsconfig.json
 ```
 
-## How to run this project
+## Future improvements
 
-### Frontend steps
-
-1. Open the project root folder.
-2. Install Node dependencies:
-
-```bash
-npm install
-```
-
-3. Start the frontend:
-
-```bash
-npm run dev
-```
-
-4. Open the browser at:
-
-```text
-http://localhost:5174
-```
-
-### Backend steps
-
-1. Open the `backend` folder.
-2. Create a Python virtual environment:
-
-```bash
-cd backend
-python -m venv my_env
-```
-
-3. Activate the environment:
-
-```bash
-.\my_env\Scripts\activate
-```
-
-4. Install backend packages:
-
-```bash
-pip install -r requirements.txt
-```
-
-5. Run the backend server or scripts as needed.
-
-## How the system works
-
-1. The system reads demand and renewable forecast data.
-2. It calculates how much generation is available.
-3. It sorts generators by cost and chooses the best units first.
-4. It checks each generator’s limits and ramp rates.
-5. When supply is not enough, it recommends market purchases.
-6. It sends results to the dashboard for display.
-
-## How the LPP optimizer works
-
-The optimizer is in `backend/optimizer.py` and uses the PuLP library for linear programming. It performs two main steps:
-
-- Baseline optimization for the full day (96 blocks) to get a reference schedule.
-- Rolling block-by-block dispatch that applies gate-closure rules and locks central generator output after a boundary.
-
-### What is used in the optimizer
-
-- `PuLP` to build LP problems and solve them with `CBC`.
-- `Generator` objects with type, cost, capacity, ramp rate, and availability.
-- `Market` objects for RTM prices and market purchase limits.
-- `MustRunForecast` for solar, wind, hydro, and IPP power.
-- `SimulationParams` to pass all input data into the solver.
-
-### Key rules in the model
-
-- Must-run solar and wind are always included.
-- Hydro has a dispatch limit and a daily budget.
-- State thermal and IPP generators are dispatched with ramp limits.
-- Central generator (CGS) output is locked after a gate-closure boundary depending on odd/even block rules.
-- RTM purchase is allowed but treated as last resort with a high premium.
-- Shortage and curtailment are penalized heavily to keep the model stable.
-
-### Cost calculation
-
-- Thermal generator cost = output × generator cost × 250.
-- Hydro cost = hydro output × ₹2/kWh × 250.
-- RTM cost = purchase × (MCP + premium) × 0.25.
-- Shortage cost and curtailment cost are high penalties to avoid unserved energy and unnecessary spill.
-
-### Output and recommendations
-
-For each block, the optimizer returns:
-
-- dispatch for each generator
-- hydro dispatch and must-run totals
-- RTM market buy decision
-- shortage and curtailment values
-- total cost and marginal cost
-- alerts and recommendations for the next 2 hours
-
-This section explains how your LP-based optimizer works and what it uses, so the README now documents the full LPP approach.
-
-## Notes for users
-
-- Keep the backend virtual environment activated when running Python scripts.
-- Use the frontend server to view the dashboard and charts.
-- If you change data or settings, restart the app to apply updates.
-
-## Possible improvements
-
-- Add weather forecast input
-- Use real-time market price feeds
-- Add more detailed demand forecasting
-- Improve alert and notification handling
-
-## Summary
-
-PowerOpt is a practical demo tool for power dispatch planning. It combines a Python backend and a React frontend so operators can see optimization results and manage power purchase decisions more clearly.
+- Add weather forecast integration and dynamic solar/wind variability.
+- Use live market price feeds instead of static RTM prices.
+- Add generator commitment and unit start/stop cost modeling.
+- Add an alert panel for shortage or curtailment warnings.
+- Add exportable reports for daily dispatch results.

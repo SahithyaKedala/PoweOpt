@@ -8,6 +8,7 @@ function App() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<string>('overview');
+  const [costOptimizationApplied, setCostOptimizationApplied] = useState<boolean>(false);
   
   // Real-time tracking and block selector override
   const [currentBlock, setCurrentBlock] = useState<number>(1);
@@ -242,6 +243,9 @@ function App() {
                   setIsAutoBlock(false);
                   setCurrentBlock(block);
                 }}
+                costOptimizationApplied={costOptimizationApplied}
+                onApplyCostOptimization={() => setCostOptimizationApplied(true)}
+                onResetCostOptimization={() => setCostOptimizationApplied(false)}
               />
             </>
           ) : null}

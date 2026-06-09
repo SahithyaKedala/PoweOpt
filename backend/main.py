@@ -14,11 +14,13 @@ from database import (
     GeneratorDB, MarketDB, AlertDB,
     load_raw_generators, load_raw_forecast,
     load_raw_availabilities, load_raw_prices,
+    load_raw_state_thermal_totals,
     FORECAST_DB_PATH
 )
 from optimizer import (
     run_full_simulation, run_sced_simulation_with_block, Generator, Market, WeatherEvent,
-    MustRunForecast, SimulationParams, generate_market_prices
+    MustRunForecast, SimulationParams, generate_market_prices,
+    run_cost_optimization_highs
 )
 
 app = FastAPI(title="TRANSCO SCED Co-pilot API", version="2.0.0")
@@ -113,16 +115,20 @@ def get_forecast():
         raise HTTPException(status_code=503, detail="Forecast database unavailable")
 
     blocks = []
+    state_totals = load_raw_state_thermal_totals()
     for i in range(96):
         from optimizer import block_to_time, block_to_time_range
         blocks.append({
             "block": i + 1,
             "timeStr": block_to_time_range(i + 1),
             "demand": fc["demand"][i],
+            "thermal": fc["thermal"][i],
             "availability": fc.get("availability", [0.0] * 96)[i],
             "solar": fc["solar"][i],
             "wind": fc["wind"][i],
             "hydro": fc["hydro"][i],
+            "cgs": fc["cgs"][i],
+            "stateThermalTotal": state_totals["ap_thermal_net"][i],
             "rtmPrice": prices[i]
         })
     return {"blocks": blocks, "date": "28/05/2026"}
@@ -232,6 +238,9 @@ def run_simulation(params_override: dict = None):
         else:
             gen_avail_by_name[g.name] = [g.max_capacity] * 96
 
+    state_thermal_total = avail.get('State Thermal Total', [0.0] * 96)
+    cgs_ceiling = fc.get("cgs", [0.0] * 96)
+
     sim_params = SimulationParams(
         generators=generators,
         markets=markets,
@@ -241,6 +250,8 @@ def run_simulation(params_override: dict = None):
         availabilities=gen_avail_by_name,
         forecast_availability=fc.get("availability", [0.0] * 96),
         forecast_shortfall_surplus=fc.get("shortfall_surplus", [0.0] * 96),
+        state_thermal_total=state_thermal_total,
+        cgs_ceiling=cgs_ceiling,
         weather_events=weather_events,
         user_approved_actions=approved,
         user_rejected_actions=rejected
@@ -248,6 +259,30 @@ def run_simulation(params_override: dict = None):
 
     current_block = params_override.get("currentBlock", 1)
     result = run_sced_simulation_with_block(sim_params, current_block=current_block)
+
+    # ── HiGHS Cost Optimization (for the Cost Optimization tab only) ──────
+    try:
+        _, _, highs_dispatches, rtm_sell_revenue = run_cost_optimization_highs(
+            generators, fc["demand"], gen_avail_by_name,
+            fc["solar"], fc["wind"], fc["hydro"], rtm_prices,
+            forecast_availability=fc.get("availability", [0.0] * 96),
+            state_thermal_total=state_thermal_total,
+            cgs_ceiling=cgs_ceiling
+        )
+        result["costOptimizationDispatches"] = highs_dispatches
+        result["rtmSaleRevenue"] = rtm_sell_revenue
+        result["costOptSolverName"] = "HiGHS"
+
+        # Calculate real savings: rolling dispatch cost vs HiGHS optimized cost
+        highs_total_cost = sum(d["totalCost"] for d in highs_dispatches)
+        rolling_total_cost = result.get("totalCost", 0.0)
+        result["totalSavings"] = round(max(0.0, rolling_total_cost - highs_total_cost), 2)
+        result["highsTotalCost"] = round(highs_total_cost, 2)
+    except Exception as e:
+        print(f"[main.py] HiGHS cost optimization failed, falling back to baseline: {e}")
+        # Fallback: keep existing costOptimizationDispatches from the rolling dispatch
+        result["costOptSolverName"] = "PuLP-CBC (fallback)"
+        result["rtmSaleRevenue"] = 0.0
 
     # Attach generator metadata for frontend
     result["generators"] = [
@@ -258,8 +293,11 @@ def run_simulation(params_override: dict = None):
     result["forecast"] = {
         "demand": fc["demand"], "solar": fc["solar"],
         "wind": fc["wind"], "hydro": fc["hydro"],
+        "thermal": fc["thermal"],
+        "cgs": fc["cgs"],
         "availability": fc.get("availability", [0.0] * 96),
         "shortfallSurplus": fc.get("shortfall_surplus", [0.0] * 96),
+        "stateThermalTotal": state_thermal_total,
         "rtmPrices": rtm_prices
     }
     return result

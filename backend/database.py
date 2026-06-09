@@ -272,8 +272,8 @@ def _is_generator_header(value: str) -> bool:
     ignore_tokens = [
         'from', 'to', 'total', 'anticipated', 'helper row', 'helper col',
         'margin for outages', 'spinning reserve', 'support', 'surplus after',
-        'contingency', 'ap thermal net', 'total bd quantity',
-        'diff between surplus', 'yes = 1', 'no = 0', 'rate',
+        'contingency', 'ap thermal net', 'ap thermal total', 'anticipated deviation',
+        'total bd quantity', 'diff between surplus', 'yes = 1', 'no = 0', 'rate',
         'all values are in mw', 'helper'
     ]
     if any(tok in low for tok in ignore_tokens):
@@ -298,7 +298,11 @@ def load_raw_generators():
                 merit_map[k] = v
         except Exception:
             pass
-        cur.execute("SELECT * FROM [genco__and_ipp]")
+
+        try:
+            cur.execute("SELECT * FROM [genco__and_ipp]")
+        except Exception:
+            cur.execute("SELECT * FROM [genco_and_ipp]")
         rows = cur.fetchall()
         if not rows or len(rows) < 2:
             return []
@@ -419,6 +423,7 @@ def load_raw_forecast():
 
         idx_tb = _find_header('tb')
         idx_demand = _find_header('estimated forecast')
+        idx_thermal = _find_header('thermal')
         idx_solar = _find_header('remc solar')
         idx_wind = next((i for i, label in enumerate(header)
                          if label and 'wind' in label.lower() and 'qca' in label.lower()), None)
@@ -489,6 +494,8 @@ def load_raw_forecast():
                 fc['srisailam'][i] = _fv(row[idx_srisailam])
             if idx_cgs is not None and idx_cgs < len(row):
                 fc['cgs'][i] = _fv(row[idx_cgs])
+            if idx_thermal is not None and idx_thermal < len(row):
+                fc['thermal'][i] = _fv(row[idx_thermal])
             if idx_addl is not None and idx_addl < len(row):
                 fc['addl'][i] = _fv(row[idx_addl])
             if idx_seil_p1 is not None and idx_seil_p1 < len(row):
@@ -538,7 +545,56 @@ def load_raw_availabilities():
         availabilities['Wind'] = [0.0] * 96
         availabilities['Hydro'] = [0.0] * 96
 
+    state_totals = load_raw_state_thermal_totals()
+    availabilities['State Thermal Total'] = state_totals.get('ap_thermal_net', [0.0] * 96)
+    availabilities['State Thermal Total Raw'] = state_totals
+
     return availabilities
+
+
+def load_raw_state_thermal_totals():
+    """Load the AP THERMAL NET and AP THERMAL TOTAL profiles from genco_and_ipp."""
+    conn = _conn()
+    cur = conn.cursor()
+    try:
+        try:
+            cur.execute("SELECT * FROM [genco__and_ipp]")
+        except Exception:
+            cur.execute("SELECT * FROM [genco_and_ipp]")
+        rows = cur.fetchall()
+        if not rows or len(rows) < 2:
+            return {'ap_thermal_net': [0.0] * 96, 'ap_thermal_total': [0.0] * 96}
+
+        header = [str(x).strip() if x is not None else '' for x in rows[0]]
+        data_rows = rows[1:]
+        idx_net = next((i for i, label in enumerate(header) if label and 'ap thermal net' in label.lower()), None)
+        idx_total = next((i for i, label in enumerate(header) if label and 'ap thermal total' in label.lower()), None)
+
+        def _fv(v):
+            if v in (None, '', '#REF!'):
+                return 0.0
+            try:
+                return float(v)
+            except Exception:
+                return 0.0
+
+        ap_thermal_net = [0.0] * 96
+        ap_thermal_total = [0.0] * 96
+        block_index = 0
+        for row in data_rows:
+            if block_index >= 96:
+                break
+            if idx_net is not None and idx_net < len(row):
+                ap_thermal_net[block_index] = _fv(row[idx_net])
+            if idx_total is not None and idx_total < len(row):
+                ap_thermal_total[block_index] = _fv(row[idx_total])
+            block_index += 1
+
+        return {'ap_thermal_net': ap_thermal_net, 'ap_thermal_total': ap_thermal_total}
+    except Exception:
+        return {'ap_thermal_net': [0.0] * 96, 'ap_thermal_total': [0.0] * 96}
+    finally:
+        conn.close()
 
 
 def load_raw_prices():
@@ -551,12 +607,12 @@ def load_raw_prices():
 
         mcp_kwh_col = next((c for c in cols if c.lower() == 'mcp_rs_kwh' or 'rs_kwh' in c.lower()), None)
         mcp_mwh_col = next((c for c in cols if 'mcp' in c.lower() and 'rs/mwh' in c.lower()), None)
-        if mcp_mwh_col:
-            price_col = mcp_mwh_col
-            convert_from_kwh = False
-        elif mcp_kwh_col:
+        if mcp_kwh_col:
             price_col = mcp_kwh_col
             convert_from_kwh = True
+        elif mcp_mwh_col:
+            price_col = mcp_mwh_col
+            convert_from_kwh = False
         else:
             return [3000.0] * 96
 

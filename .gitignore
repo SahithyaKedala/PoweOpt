@@ -1,6 +1,8 @@
 # Dependencies
 node_modules/
 my_env/
+backend/my_env/
+.venv/
 
 # Build output
 dist/
@@ -16,8 +18,28 @@ __pycache__/
 
 # Environment / secrets
 .env
-.env.local
-.env.production
+.env.*
+*.env
+*.env.local
+*.env.production
+
+# Security-sensitive files
+*.key
+*.pem
+*.p12
+*.crt
+*.jks
+*.der
+*.pfx
+*.asc
+*.secrets
+credentials.json
+secret*.json
+
+# Logs and temporary files
+*.log
+*.tmp
+*.temp
 
 # Temp / generated scripts
 inspect_db.py
